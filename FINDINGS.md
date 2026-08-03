@@ -252,6 +252,118 @@ members in SCREAMING_SNAKE (those are wire values).
 
 ---
 
+## Finding 8 · The NYT SDK cannot deserialize its own Search response
+
+**This is the most serious finding in the log: the generated model is wrong against the live API,
+and it breaks the only operation the `Search` controller has.**
+
+**Asked for:** call `client.Search.ReturnsAnArrayOfArticles` and read `response.Response.Docs`.
+
+**Produced:** the call reaches the API, authenticates, and returns HTTP 200 — then the SDK throws
+while parsing its own response:
+
+```
+System.Text.Json.JsonException: The JSON value could not be converted to
+System.Nullable`1[System.Int32]. Path: $.response.docs[0].print_page
+ ---> System.InvalidOperationException: Cannot get the value of a token type 'String' as a number.
+   at Nytimes.Core.Response.JsonResponse`1.Map(...)
+```
+
+`Models/ArticleSearchArticle.cs:24` declares:
+
+```csharp
+[JsonPropertyName("print_page")]
+public int? PrintPage { get; init; }
+```
+
+**Actually correct:** the live API returns `print_page` as a **string**. Verified directly against
+`https://api.nytimes.com/svc/search/v2/articlesearch.json`:
+
+```
+print_page      String    "3"
+print_section   String    "BU"
+word_count      Int64     635
+```
+
+So `print_page` must be `string?`. (`print_section` is already `string?` and `word_count` is
+genuinely numeric — this is one field, not a systemic type problem.)
+
+**Severity:** total. Every Article Search response carries `print_page`, so *no* query succeeds. The
+exception is a `JsonException` from the serializer, **not** an `SdkException`, so it bypasses the
+error-handling contract the SDK map documents — a correctly-written `catch (SdkException<…Error>)`
+ladder does not catch it, and the process dies with an unhandled exception and exit code 134.
+
+**Should have been prevented by:** the generator, or the spec it consumed — the API's own
+documentation types this field as a string. Nothing in the plugin could have saved us: the SDK map
+faithfully reports `PrintPage (print_page): int?`, so the map is *correct about the SDK* and the SDK
+is wrong about the API. An agent doing everything right — reading the map, trusting the contract —
+still produces code that cannot work, and only finds out at runtime against a live endpoint.
+
+**Reproducible:** yes, deterministically — any Article Search query. Workaround applied in
+`scripts/patch-sdk.ps1` (patch 1).
+
+---
+
+## Finding 9 · `Response1.Meta` is bound to a wire name the API does not send
+
+**Asked for:** print the total hit count from `response.Response.Meta.Hits`, as the SDK map and the
+build plan both describe (`result.response.meta { hits, offset, time }`).
+
+**Produced:** `Meta` was always `null`, so the CLI could only print `10 of ? hits`. No error, no
+warning — a silently absent field.
+
+**Actually correct:** the live response has no `meta` key. Its `response` object contains exactly
+`docs` and **`metadata`**:
+
+```
+=== live response.meta ===
+null
+=== response top-level keys ===
+docs, metadata
+```
+
+`Models/Response1.cs` binds `[JsonPropertyName("meta")]`. It has to be `"metadata"`. After patching,
+the same query reports `10 of 10000 hits`.
+
+**Should have been prevented by:** the generator/spec, as with Finding 8. This one is worse in one
+respect and better in another: it fails **silently** rather than throwing, so an integration ships
+believing the field is simply unpopulated — but it degrades one field instead of killing the
+operation.
+
+**Reproducible:** yes. Workaround in `scripts/patch-sdk.ps1` (patch 2).
+
+---
+
+## Finding 10 · Enum `ToString()` is overridden on the base but shadowed by every derived record
+
+**Asked for:** log an order status — `$"status {order.Status}"`.
+
+**Produced:** `status OrderStatus { Value = PAYER_ACTION_REQUIRED }` instead of
+`status PAYER_ACTION_REQUIRED`. Same for `ServerEnvironment` in the startup banner:
+`env: ServerEnvironment { Value = production }`.
+
+**Actually correct:** `Core/Enum/TypedEnum.cs` does override it —
+
+```csharp
+public override string ToString() => Value.ToString() ?? string.Empty;
+```
+
+— but every generated enum is declared `public record OrderStatus : StringEnum<OrderStatus>`, and
+the C# compiler synthesises a `ToString()` for each record, which shadows the base override. The
+intended behaviour is silently lost. Use `.Value` explicitly.
+
+**Should have been prevented by:** `dotnet-models`, which explains that these are `StringEnum<T>`
+rather than C# enums and how to *construct* them, but not how to render one back to a string. The
+base class carrying a deliberate — and defeated — `ToString()` override makes the trap easy to walk
+into: the SDK author clearly intended interpolation to work.
+
+**Impact:** cosmetic, but it lands in every log line and console message an integration writes, and
+`Value` is not a name you would reach for when the base type advertises a `ToString()`.
+
+**Reproducible:** yes — interpolate any generated enum from either SDK.
+
+---
+
 ## Not yet obtainable
 
 The highest-value class of finding — *the agent had the SDK map and still generated wrong integration

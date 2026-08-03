@@ -118,7 +118,9 @@ internal static class Config
         if (nyt is not null)
         {
             // Article Search is served by the Default1 server group (map/operations/Search.md).
-            Console.WriteLine($"  NYT     {nyt.Server.Default1.Production.BaseUrl}  (env: {nyt.Environment})");
+            // .Value, not ToString(): TypedEnum overrides ToString, but each derived record
+            // regenerates its own, so interpolation would print "ServerEnvironment { Value = x }".
+            Console.WriteLine($"  NYT     {nyt.Server.Default1.Production.BaseUrl}  (env: {nyt.Environment.Value})");
         }
 
         if (paypal is not null)
@@ -128,7 +130,7 @@ internal static class Config
                 ? paypal.Server.Default.Sandbox.BaseUrl
                 : paypal.Server.Default.Production.BaseUrl;
 
-            Console.WriteLine($"  PayPal  {url}  (env: {env})");
+            Console.WriteLine($"  PayPal  {url}  (env: {env.Value})");
 
             // The SDK ships Production.BaseUrl == Sandbox.BaseUrl. Surface that rather than
             // let a reader assume "production" means live. Recorded in FINDINGS.md.

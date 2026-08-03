@@ -163,7 +163,9 @@ internal static class Checkout
             var approve = order.Links?.FirstOrDefault(l => l.Rel == "payer-action")
                           ?? order.Links?.FirstOrDefault(l => l.Rel == "approve");
 
-            Console.WriteLine($"Order created — {order.Status}");
+            // .Value throughout: these enums are records, so the compiler-generated ToString
+            // shadows TypedEnum's override and would print "OrderStatus { Value = CREATED }".
+            Console.WriteLine($"Order created — {order.Status?.Value}");
             Format.Field("order id", order.Id);
             Format.Field("invoice id", invoiceId);
             Format.Field("amount", $"USD {price}");
@@ -314,7 +316,7 @@ internal static class Checkout
 
             Console.WriteLine("Order");
             Format.Field("order id", order.Id);
-            Format.Field("status", order.Status?.ToString());
+            Format.Field("status", order.Status?.Value);
             Format.Field("custom_id", unit?.CustomId);
             Format.Field("invoice_id", unit?.InvoiceId);
             Format.Field("amount", unit?.Amount is null ? null : $"{unit.Amount.CurrencyCode} {unit.Amount.Value}");
@@ -337,7 +339,7 @@ internal static class Checkout
                 Console.WriteLine();
                 Console.WriteLine("Capture");
                 Format.Field("capture id", capture.Id);
-                Format.Field("status", capture.Status?.ToString());
+                Format.Field("status", capture.Status?.Value);
                 Format.Field("amount", capture.Amount is null ? null : $"{capture.Amount.CurrencyCode} {capture.Amount.Value}");
                 Format.Field("custom_id", capture.CustomId);
                 Format.Field("invoice_id", capture.InvoiceId);
@@ -420,7 +422,7 @@ internal static class Checkout
             entry.RefundedAt = DateTimeOffset.UtcNow.ToString("u");
             Ledger.Upsert(entry);
 
-            Console.WriteLine($"Refund {refund.Status?.ToString() ?? "issued"} — ledger now {entry.Status}");
+            Console.WriteLine($"Refund {refund.Status?.Value ?? "issued"} — ledger now {entry.Status}");
             Format.Field("refund id", refund.Id);
             Format.Field("amount", refund.Amount is null ? null : $"{refund.Amount.CurrencyCode} {refund.Amount.Value}");
             if (!isPartial)

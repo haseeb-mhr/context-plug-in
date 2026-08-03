@@ -47,9 +47,23 @@ cd context-plug-in
 git clone --depth 1 --branch main https://github.com/context-plugins/paypal-csharp-sdk  sdk/paypal-csharp-sdk
 git clone --depth 1 --branch main https://github.com/context-plugins/nytimes-csharp-sdk sdk/nytimes-csharp-sdk
 
+# REQUIRED — two generated-model defects make NYT Article Search unusable as shipped.
+pwsh scripts/patch-sdk.ps1
+
 cp .env.example .env      # then fill it in
 dotnet run --project src/NytUnlock -- --help
 ```
+
+### Why the patch step exists
+
+`scripts/patch-sdk.ps1` is not optional. The generated NYT SDK cannot parse its own Article Search
+response: `ArticleSearchArticle.PrintPage` is typed `int?` while the API returns a string, so every
+query dies with a `JsonException` — and because it is thrown by the serializer rather than the SDK,
+no `catch (SdkException<…>)` will catch it. A second patch rebinds `Response1.Meta` from `meta` to
+`metadata`, the key the API actually sends, without which hit counts are always null.
+
+The script is idempotent, prints what it changed, and must be re-run after re-cloning `sdk/`. Both
+defects are written up in [`FINDINGS.md`](./FINDINGS.md) Findings 8 and 9.
 
 ## Walkthrough
 
