@@ -15,6 +15,9 @@ obj/
 *.nupkg
 packages/
 
+# Cloned SDK sources — neither SDK is on NuGet; see README for the clone commands
+sdk/
+
 # Node / TypeScript
 node_modules/
 dist/

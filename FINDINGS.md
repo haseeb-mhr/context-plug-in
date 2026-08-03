@@ -169,6 +169,89 @@ with the artifact it describes, after Finding 1.
 
 ---
 
+## Finding 6 · The PayPal SDK routes `Production` to the sandbox host
+
+**Asked for:** build a production guard for the CLI, reading base URLs off the client
+configuration rather than hardcoding them (hackathon ground rule 2).
+
+**Produced / observed:** `Servers/DefaultOptions.cs` in `paypal-csharp-sdk` declares both
+environments with the **same** base URL:
+
+```csharp
+public class ProductionOptions
+{
+    public string BaseUrl { get; set; } = "https://api-m.sandbox.paypal.com";
+}
+public class SandboxOptions
+{
+    public string BaseUrl { get; set; } = "https://api-m.sandbox.paypal.com";
+}
+```
+
+Corroborating signals in the same file and `Servers/ServerEnvironment.cs`: the XML doc on
+`ServerEnvironment.Production` reads *"PayPal Sandbox Environment"* — the same text as `Sandbox` —
+and `ServerEnvironment.Default()` returns `Production`.
+
+**Actually correct:** live PayPal is `https://api-m.paypal.com`. As shipped, selecting
+`ServerEnvironment.Production` sends traffic to sandbox, and there is no environment member that
+reaches production at all — you must override `options.Server.Default.Production.BaseUrl` by hand.
+
+**Should have been prevented by:** the generated server wiring, and secondarily the SDK map, which
+states *"`options.Environment` is a `ServerEnvironment` … with members `Production`, `Sandbox`"*
+and links `Servers/` without noting the two resolve identically. An agent reading only the map has
+no way to learn that `Production` is not production.
+
+**Cuts both ways.** Benign for a hackathon (you cannot accidentally charge a real card), but the
+inverse is the real risk: an integration that believes it went live silently did not, and
+transactions are missing from the live account with no error anywhere. Our banner now prints a
+warning when the two URLs match rather than letting the environment name speak for itself.
+
+**Reproducible:** yes — `git clone --depth 1 --branch main
+https://github.com/context-plugins/paypal-csharp-sdk` and read `Servers/DefaultOptions.cs`.
+
+---
+
+## Finding 7 · Where the .NET SDK map succeeded — recorded for balance
+
+The guide asks for honest findings, so the positive result belongs here alongside the defects.
+
+**Asked for:** implement six operations across three controllers — NYT `Search`, PayPal `Orders`
+(create/get/capture) and `Payments` (get captured/refund) — in C#, working only from the bundled
+`sdk-map.md` and its `map/` sub-pages, cloning SDK source only where the map was silent.
+
+**Produced:** roughly 600 lines across 7 files **compiled on the first `dotnet build`, zero errors
+and zero warnings.** No signature guess, enum member, model field name or error accessor needed
+correcting.
+
+Facts the map supplied correctly and completely, each verified by the compiler:
+
+| Fact | Map value |
+| --- | --- |
+| Operation signatures | Full positional order, incl. `payPalMockResponse` … `body` and `prefer = "return=minimal"` defaults |
+| Enum member names | `CheckoutPaymentIntent.Capture`, `ItemCategory.DigitalGoods`, `PayPalExperienceUserAction.PayNow` — PascalCase members, SCREAMING_SNAKE wire values |
+| `ItemRequest.Quantity` | `string !req` — typed correctly, the trap the plan predicted |
+| Error model | `SdkException<TOpError>` + `TryGetError(out Error)` / `TryGetRawError(out RawError)`, with per-status mapping |
+| Capture id path | `PurchaseUnits[0].Payments.Captures[0].Id` (`OrdersCapture`) |
+| NYT auth | `options.Apikey`, plain `string?` |
+
+**What the map did not settle**, requiring the source clone the skill itself recommends:
+`ApplicationContextShippingPreference` members (the enum row was truncated in the rendered table),
+the `OAuth2ClientCredentials` field names (`ClientId`/`ClientSecret`), the `ServerOptions` shape
+needed to read base URLs for the banner, and `ArticleSearchArticle` — the NYT docs array is
+`ArticleSearchArticle`, **not** the `Article` record a name-based guess lands on, and it exposes
+`Uri` but no `Id`.
+
+**Bearing on Finding 1:** this is the strongest evidence for the .NET-only concern. The contract
+that made a first-try compile possible exists in exactly one language. The same build in TypeScript
+would have started from the plan's hand-written ground truth — which `BUGS.md` BUG-05 and BUG-06
+show was already self-contradictory and, on two points, wrong for .NET: it claimed `createOrder`
+takes the body first (it does not — headers precede `body` in the C# signature) and gave enum
+members in SCREAMING_SNAKE (those are wire values).
+
+**Reproducible:** yes — `dotnet build src/NytUnlock` against the committed source.
+
+---
+
 ## Not yet obtainable
 
 The highest-value class of finding — *the agent had the SDK map and still generated wrong integration
