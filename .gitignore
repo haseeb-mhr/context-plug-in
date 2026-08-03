@@ -15,6 +15,15 @@ obj/
 *.nupkg
 packages/
 
+# Node / TypeScript
+node_modules/
+dist/
+
+# App runtime state
+ledger.json
+.cache/
+
 # IDE
 .vs/
 .idea/
+.claude/settings.local.json
