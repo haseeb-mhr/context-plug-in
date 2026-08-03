@@ -1,0 +1,20 @@
+# Secrets — must never be committed
+.env
+.env.*
+!.env.example
+
+# .NET build output
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+
+# NuGet
+*.nupkg
+packages/
+
+# IDE
+.vs/
+.idea/
