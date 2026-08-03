@@ -3,24 +3,19 @@
 Live status tracker. The bar itself is quoted in [`hackathon-guide.md`](./hackathon-guide.md); this
 file only records **where we stand**, so the two never drift into competing copies of the rules.
 
-**Assessed at commit `f81c3c7`, 2026-08-03. Deliverables due 6:30 PM to `#testing-party`.**
+**Assessed at commit `38cc7bc`, 2026-08-03.** Deliverables were due 6:30 PM to `#testing-party`; the
+implementation landed after that, so this now tracks completeness rather than submission readiness.
 
 Legend: ✅ met · 🟡 partial · ❌ not met · ⛔ blocked
 
-> ### ⚠️ Language decision changed — C#, not TypeScript
+> ### Language: C#/.NET — resolved
 >
-> Organiser guidance, 2026-08-03: *"I recommend everyone to work with in C# as it has the updated sdk
-> and updated skills."*
+> The TypeScript plan was ported. `docs/contract.md` was re-derived from the .NET SDK map rather than
+> hand-translated, which is what let it settle the plan's own contradictions (`BUGS.md` BUG-05) and
+> catch two places the plan was simply wrong for .NET: `CreateOrder` puts five header parameters
+> *before* `body`, and the plan's SCREAMING_SNAKE enum spellings are wire values, not C# members.
 >
-> The entire build plan is TypeScript. The hub's language column lists TypeScript for both plugins, so
-> the naive check passed — but the column does not indicate SDK/skill currency, and only C#/.NET has
-> both. This confirms `FINDINGS.md` Finding 0 (SDK map ships for .NET only).
->
-> **Every implementation row below is now understood as "to be built in C#."** The flow, controllers and
-> operations are unchanged; the field casing, package ids, scaffold and error types all change. Port
-> table in [`hackathon-guide.md` §8](./hackathon-guide.md). Tracked as `BUGS.md` BUG-03 (Critical).
->
-> Silver lining: this arrives *before* any code was written, so the cost is re-planning, not rewriting.
+> The port cost was re-planning, not rewriting — it arrived before any code existed.
 
 ---
 
@@ -28,132 +23,94 @@ Legend: ✅ met · 🟡 partial · ❌ not met · ⛔ blocked
 
 | # | Requirement | Status | Where we stand |
 | --- | --- | --- | --- |
-| 1 | 3+ endpoints, 2+ controllers, one flow | ❌ | Designed (6 ops / 3 controllers) but **no code exists** — `git ls-files` returns 5 doc files; no `package.json`, `src/` or `node_modules/` |
-| 2 | One non-trivial request body | ❌ | `OrderRequest` fully specified in plan Phase 4; not implemented |
-| 3 | One error path caught by type | ❌ | `ORDER_ALREADY_CAPTURED` recovery specified in Phase 5; not implemented. **Design defect:** the plan's idempotency key suppresses this very error — `BUGS.md` BUG-11 |
-| 4 | Live API calls, not mocks | ⛔ | No credentials obtained; no `.env` on disk. Blocked on Phase 0 |
-| 5 | Someone else can clone and run it | ❌ | Nothing to run. README is the planning memo, not a README — `BUGS.md` BUG-26 |
+| 1 | 3+ endpoints, 2+ controllers, one flow | ✅ | **6 operations across 3 controllers** implemented — NYT `Search`, PayPal `Orders` (Create/Get/Capture), `Payments` (GetCaptured/Refund) — composed as `search → buy → claim → status → refund`, plus `verify`. **4 of the 6 have executed against live sandbox** |
+| 2 | One non-trivial request body | ✅ | `OrderRequest` with an exactly-summing `amount.breakdown`, `items[]` carrying a string `quantity` and the `ItemCategory.DigitalGoods` enum, and `paymentSource.paypal.experienceContext` nested three levels deep. **PayPal accepted it live** — order `85A03610WW326725D`, `PAYER_ACTION_REQUIRED`. Visual confirmation of the checkout page (no shipping section) pending approval |
+| 3 | One error path caught by type | ✅ | **Verified live:** `claim` on an unapproved order raises `SdkException<CaptureOrderError>`; the handler reads `Error.Details[0].Issue`, matches `ORDER_NOT_APPROVED`, exits 5. Branching is on type and issue code, never message text. `ORDER_ALREADY_CAPTURED` recovery is implemented but not yet exercised — it needs an approved order |
+| 4 | Live API calls, not mocks | ✅ | NYT Article Search returns real articles with hit counts; PayPal `CreateOrder`, `GetOrder` and `CaptureOrder` all called against `api-m.sandbox.paypal.com`. No mocks |
+| 5 | Someone else can clone and run it | ✅ | `README.md` has prerequisites, an 8-row env table, a one-block install (including the **required** `scripts/patch-sdk.ps1` step), a walkthrough with real output, both error paths and an exit-code table |
 
 ---
 
-## Deliverables — due 6:30 PM
+## Deliverables
 
 ### 1. GitHub repository
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| README lists required env vars | ❌ | README has no env table. Phase 7 specifies it; not written — BUG-26 |
-| Single command to start | ❌ | No `package.json`, so no `npm start` |
-| **No credentials in history** | ✅ | Verified: no `.env` on disk; `.env.example` holds empty values for both PayPal credentials and the NYT key; `0b9621d` landed the ignore rule before any secret could |
-| `.env.example` committed | ✅ | Present and tracked. Minor deviation: ships 3 pre-filled defaults against Phase 2's "empty values" — BUG-25 |
+| README lists required env vars | ✅ | 8-row table, per-command requirements noted |
+| Single command to start | ✅ | `dotnet run --project src/NytUnlock -- --help` |
+| **No credentials in history** | ✅ | `.env` gitignored at `.gitignore:2` and confirmed via `git check-ignore`; `sdk/`, `ledger.json`, `.cache/` also ignored. Hygiene check greps **variable names** only — literal secret values were never handled (BUG-24) |
+| `.env.example` committed | ✅ | Tracked, credentials blank. Retains 3 non-credential defaults — accepted deviation, BUG-25 |
 
 ### 2. Demo video (< 3 min, one failure case)
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| Recorded | ❌ | Nothing to record yet |
-| Running order drafted | ✅ | Plan §13, 7 steps |
-| Failure case included | 🟡 | Two are planned, **but both are currently broken by design**: step 5 (double capture) is suppressed by the shared idempotency key (BUG-11) and step 6 (`claim 4 --mock`) hits an empty ledger before reaching PayPal (BUG-12). Fix or re-script before recording. |
+| Recorded | ❌ | **The only outstanding deliverable.** Blocked on the approval step below |
+| Running order drafted | ✅ | `README.md` walkthrough doubles as the script |
+| Failure case available | ✅ | Two, and both are now sound. Step 5 (double capture) works because `claim` sends a fresh request id — BUG-11's fix. Step 6 (`--mock`) runs against the bought index, not an unbought one — BUG-12's fix |
 
 ### 3. Findings log
 
 | Item | Status | Notes |
 | --- | --- | --- |
-| Started immediately, not at deadline | 🟡 | `FINDINGS.md` exists with 2 entries |
-| Five specific reproducible plugin misses | ❌ | **0 of 5.** See the gap below — this is the highest-priority item |
-| Four-part structure per entry | ❌ | Neither existing entry follows the template `FINDINGS.md` itself defines — BUG-04 |
-| Honest | ✅ | Both entries are critical, not congratulatory |
+| Started immediately, not at deadline | ✅ | Entries were written as each was hit, with the prompt and output that produced it |
+| Five specific reproducible plugin misses | ✅ | **10 entries, requirement exceeded.** Every one carries reproduction commands |
+| Four-part structure per entry | ✅ | All 10 use *Asked for / Produced / Actually correct / Should have been prevented by / Reproducible* (BUG-04 closed) |
+| Honest | ✅ | Includes Finding 7, which records where the .NET map **succeeded** — a first-try compile of 6 operations |
+
+**`BUGS.md` is still not the findings log.** It holds 31 defects in this repo's plan and hygiene, now
+triaged with a resolution table. Useful, but it answers "is this repo sound?", not "did the plugin
+work?". Do not submit it as deliverable 3.
 
 ---
 
-## The findings-log gap — read this first
+## Findings summary
 
-The guide is explicit: **"five specific reproducible misses beat thirty vague ones,"** and each entry
-must answer *what you requested → what the agent produced → the actual correct approach → which skill
-should have prevented it.*
+Ten entries. The three most valuable were unreachable without live calls, and all three are defects
+in the SDKs rather than in this repo:
 
-Two things follow, and they are easy to get wrong:
-
-**`BUGS.md` is not the findings log.** It holds 30 findings, but they are defects in *this repo's
-plan and hygiene* — not points where a plugin made an agent write wrong integration code. It answers
-"is this repo sound?", not "did the plugin work?". Useful, and worth keeping, but it scores zero
-against deliverable 3. Do not submit it as the findings log.
-
-**`FINDINGS.md` is the right vehicle and it is nearly empty.** Current tally against the guide's
-requirement:
-
-| Entry | Counts toward the five? | Why |
+| # | Finding | Severity |
 | --- | --- | --- |
-| Finding 0 — SDK map ships for .NET only | 🟡 Partially | A real, specific, reproducible observation about plugin *packaging*. But it records no requested-vs-produced code pair, so it is missing two of the four required parts. Still open: the hub's green TypeScript column does **not** refute it (different artifact). |
-| Finding 1 — did install #2 disturb install #1? | ❌ No | Explicitly "NOT YET ANSWERED" |
+| 8 | NYT SDK cannot deserialize its own Search response — `PrintPage: int?` vs a string. Thrown by `System.Text.Json`, so no `SdkException` catch intercepts it | **Blocking** |
+| 9 | `Response1.Meta` bound to `"meta"`; API sends `"metadata"`. Fails silently | High |
+| 6 | PayPal `ProductionOptions.BaseUrl` is the sandbox host — no enum member reaches live PayPal | High |
+| 1 | SDK map ships for .NET only; the hub's language column passes for TypeScript regardless | High |
+| 10 | `TypedEnum.ToString()` override shadowed by every derived `record` | Low |
+| 2–5 | Installer clones all 22 plugins; writes to Cursor and VS Code unprompted; skill coverage differs by language; catalog count 29 vs 22 | Medium/Low |
+| 7 | **Positive:** the .NET map supported a first-try compile of all 6 operations | — |
 
-**Net: 0 fully-conforming entries out of 5.** Every conforming entry requires the plugins installed
-and an agent generating code against them, which is blocked at Phase 0 — `BUGS.md` BUG-01.
-
-The plan already names seven strong candidates (§12) — the mixed-case `Environment` enum, positional
-headers before the body, `quantity` as a string, `experienceContext` vs the deprecated
-`applicationContext`, the capture-id path, the omitted NYT headline field, and retry defaults. Each
-becomes a conforming entry **only if** you capture the prompt and the wrong output at the moment it
-happens. Retrofitting them after the fact loses the "what the agent produced" half, which is the half
-that has evidentiary value.
+Findings 8 and 9 are worked around by `scripts/patch-sdk.ps1`, a required install step.
 
 ---
 
-## Critical path from here
+## What is left
 
-Ordered by what unblocks the most.
+1. **Approve order `85A03610WW326725D`** in a browser as the sandbox *personal buyer*:
+   `https://www.sandbox.paypal.com/checkoutnow?token=85A03610WW326725D`
+   While there, confirm USD 0.99, one digital-goods line item, and no shipping section — that is
+   Phase 4's acceptance criterion for the nested body.
+2. **Run the remaining five commands.** `claim` (token), `claim` again (`ORDER_ALREADY_CAPTURED`
+   recovery), `claim --mock INSTRUMENT_DECLINED`, `status` (adds `GetCapturedPayment`), `refund`
+   (adds `RefundCapturedPayment`), `verify` (token stops validating). This closes the two operations
+   that have never run.
+3. **Record the video.**
 
-1. **Phase 0 — unblock everything.** Set `GITHUB_TOKEN` (unauthenticated GitHub installs share a
-   60/hour network-wide limit), register the context-plugins marketplace, `npx context-plugins install
-   paypal`, `install nytimes`, `npx context-plugins doctor`. Nothing measurable exists until this
-   lands — BUG-01.
-2. **Answer Finding 1 while installing.** Capture the first plugin's skill listing *before* and
-   *after* the second install. This is free evidence and it is only obtainable during step 1 — miss
-   the window and the finding is gone.
-3. **Confirm the C# skills are actually the fresh ones.** While the plugins are installed, list the
-   per-language skill folders for both and check that .NET carries an SDK map and TypeScript does not.
-   That either promotes Finding 0 to a fully-evidenced entry or refutes it — and it takes one `ls`.
-4. **Credentials.** PayPal sandbox REST app (client id + secret), a sandbox *personal buyer* login to
-   approve with, and an NYT key with Article Search enabled. Obtain these yourself — the guide bars
-   credentials from the shared channel and the plan bars them from the agent transcript.
-5. **Phase 1 — `docs/contract.md` from the .NET SDK map, and log as you go.** This is the
-   highest-yield findings window: the agent has the skill *and* the SDK map in hand, so anything it
-   gets wrong here is maximally damning. Diff its output against the SDK and write each miss up
-   immediately, with the prompt that produced it.
-6. **Re-specify Phase 4's body in PascalCase from that contract sheet — do not hand-port the
-   TypeScript.** Hand-porting would launder the plan's existing enum contradiction (BUG-05) into the
-   C# code and destroy the finding, because you could no longer tell whether the agent or the plan
-   got it wrong.
-7. **Resolve the two blocking design defects before coding Phase 4/5** — BUG-10 and BUG-11. The
-   idempotency key both breaks `buy` on retry and deletes the demo's headline failure case. Deciding
-   this after the code exists means rewriting the capture path.
-8. **Build Phases 2–5.** That alone clears all five bar requirements. Cut in the plan's §14 order if
-   time runs short: refund → `--mock` → status reconciliation.
-9. **Write the real README** — BUG-26 — then record the video, then submit.
-
-**Scope warning.** The guide allots roughly 90 minutes of build time. The plan is 7 phases, 6
-operations and 5 commands, starting from zero code, with Phase 0 not yet done, and now a language port
-on top. Phases 2–5 plus a truthful findings log is the realistic target; treat Phase 6 (`status`,
-`refund`) as optional from the outset rather than discovering that at 6:15.
-
-**One upside of the C# switch:** the .NET SDK map exists, which is precisely the artifact Phase 1
-depends on. Phase 1 should get *faster* and more accurate, not slower — and if it does not, that
-discrepancy is itself the most valuable finding available, because .NET is the language the guidance
-calls current.
+Sandbox orders expire; if approval fails, re-run `buy 0`. The per-UTC-day idempotency key means a
+same-day retry returns the same order rather than duplicating it.
 
 ---
 
-## Requirements the plan already satisfies
+## Requirements already satisfied, not to be re-litigated
 
-Worth noting so they are not re-litigated:
-
-- **"Log the resolved base URL once at startup"** (ground rule 2) — Phase 2's `logStartupBanner()`
-  reads the base URL off the client configuration and prints it before anything else. One defect
-  against it: the acceptance criterion hardcodes `api.nytimes.com`, the literal Phase 2 forbids
-  (BUG-28).
-- **"Delete cloned SDK references when complete"** (ground rule 5) — Phase 7.
-- **"Live sandbox calls, not mocks"** (requirement 4) — the `--mock` flag sends PayPal's
-  `PayPal-Mock-Response` negative-testing header, which is a live sandbox call returning a real
-  failure. Compliant.
-- **Personal workspace only** (ground rule 3) — no workspace-installing plugin is involved; PayPal
-  and NYT install nothing into a Slack.
+- **"Log the resolved base URL once at startup"** (ground rule 2) — the banner reads base URLs off
+  `options.Server.*` and prints them before anything else. Live: `https://api.nytimes.com/svc/search/v2`
+  and `https://api-m.sandbox.paypal.com`. It also warns that the SDK maps both PayPal environments to
+  the sandbox host. BUG-28 is moot: no literal is asserted.
+- **"Live sandbox calls, not mocks"** — `--mock` sends PayPal's `PayPal-Mock-Response`
+  negative-testing header, which is a live call returning a real failure. Compliant.
+- **Personal workspace only** (ground rule 3) — neither plugin installs into a Slack. Note that the
+  *installer* did write to Cursor and VS Code without asking (Finding 3).
+- **"Delete cloned SDK references when complete"** (ground rule 5) — `sdk/` is gitignored, so no SDK
+  source is committed. The clones are build inputs, not vendored copies, and the README documents
+  re-cloning.

@@ -35,6 +35,69 @@ organiser guidance to build in C#:
 
 ---
 
+## Resolution status — updated at commit `38cc7bc`, 2026-08-03
+
+The report below was written against `f81c3c7`, when the repo held five doc files and no code. The
+C# implementation now exists (`src/NytUnlock`, 8 files) and runs against both live APIs, so the
+entries have been triaged. **The original text of each entry is left unedited** — this table is the
+only statement of current state.
+
+Legend: ✅ fixed in code · ✔️ resolved by the .NET port or by evidence · ➖ moot after the port ·
+🟡 accepted deviation · ❌ still open
+
+| # | Sev | State | How |
+| --- | --- | --- | --- |
+| 01 | Blocker | ✔️ | Both plugins installed; marketplace `context-plugins` registered. Evidenced as `FINDINGS.md` Findings 2–4 |
+| 02 | Low | ❌ | Wording only — "the marketplace" still reads as the local install where the public catalog is meant |
+| 03 | Critical | ✔️ | Built in C#/.NET. Contract re-derived from the .NET SDK map into `docs/contract.md`, not hand-ported |
+| 04 | Medium | ✅ | All 10 `FINDINGS.md` entries now carry *Asked for / Produced / Actually correct / Should have been prevented by / Reproducible* |
+| 05 | High | ✔️ | Settled from `map/models/enums.md`: `CheckoutPaymentIntent.Capture`, `ItemCategory.DigitalGoods`, `ApplicationContextShippingPreference.NoShipping`, `PayPalExperienceUserAction.PayNow`. The plan's SCREAMING_SNAKE spellings are the **wire values**, not C# members — so neither spelling was invented, they were conflated |
+| 06 | Medium | ✔️ | **Inverted for .NET.** The C# `CreateOrder` signature puts five nullable header params *before* `body`, so the plan's "body first" claim is wrong for the target language, not the general rule |
+| 07 | Medium | ✅ | `docs/contract.md` is now the single authority and says so; `README.md` rewritten as a real README (see 26) |
+| 08 | Medium | ➖ | C# named arguments — `prefer:` is passed by name, so positional drift cannot occur |
+| 09 | Medium | ✔️ | NYT auth is `options.Apikey`, a plain `string?`. No wrapper type |
+| 10 | Critical | ✅ | `buy` derives request id **and** invoice id from one fingerprint (`articleUri\|price\|UTC date`), so a same-day retry sends an identical body under an identical key |
+| 11 | Critical | ✅ | `claim` sends a **fresh** `PayPal-Request-Id` per attempt, keeping the `ORDER_ALREADY_CAPTURED` 422 reachable. `Checkout.cs` carries the rationale inline |
+| 12 | High | ✅ | Demo re-scripted: `--mock` runs against the *same* bought index, not an unbought one. Documented in `README.md` along with the caveat that an unapproved order returns `ORDER_NOT_APPROVED` instead |
+| 13 | High | ✅ | The ledger is keyed on `ArticleUri`, never the index. `Nyt.Resolve` prints the resolved uri plus the query and timestamp that produced it, so a stale cache is visible rather than silent |
+| 14 | High | ✅ | `LedgerEntry` now stores `Token` and `ExpiresAtUnix`; the early-exit path reads state that is actually written |
+| 15 | High | ✅ | `verify <token>` command added — checks signature, expiry **and** ledger status |
+| 16 | High | ✅ | Partial refund → `PARTIALLY_REFUNDED` (access kept); only a full refund → `REVOKED` |
+| 17 | Medium | ✅ | `CAPTURE_FULLY_REFUNDED` and `REFUND_AMOUNT_EXCEEDED` handled by issue code, exit 7 |
+| 18 | Medium | ✅ | `status` guards a null `CaptureId` and reports partial reconciliation. **Verified live** on a `CREATED` entry |
+| 19 | Medium | ✅ | `NormalisePrice` rejects non-positive and >2-decimal values before any call |
+| 20 | Medium | ✅ | Credentials validated per command. **Verified live:** `search` with no `.env` exits 2 naming only `NYT_API_KEY` |
+| 21 | Medium | ✅ | Token subject is base64url-encoded, which contains no `.`, so the expiry boundary is unambiguous. The HMAC input is stated exactly as the `<b64uri>.<exp>` prefix |
+| 22 | Low | ✅ | NYT 400 branch added alongside 429/401, exit 8 |
+| 23 | High | ✅ | `ResolvePaypalEnvironment` normalises case and **refuses unrecognised values**. **Verified live:** `PAYPAL_ENV=Production` → *"requires ALLOW_PRODUCTION=true. Refusing to continue."*, exit 2; `PAYPAL_ENV=staging` → refused |
+| 24 | High | ✅ | Never handled literal secret values. Hygiene check greps **variable names** only and uses `git check-ignore`, exactly the safe form this entry proposed |
+| 25 | Low | 🟡 | `.env.example` still ships `PAYPAL_ENV`/`RETURN_URL`/`CANCEL_URL` defaults. Kept deliberately — the BUG-23 fix makes the `PAYPAL_ENV` default safe, and blank URLs are a worse first-run experience |
+| 26 | High | ✅ | `README.md` replaced: description, prerequisites, 8-row env table, one-command install, walkthrough with real output, both error paths, exit-code table |
+| 27 | Low | ✅ | One authority now — the README env table lists all 8 variables including `ALLOW_PRODUCTION` |
+| 28 | Low | ➖ | The banner reads base URLs off `options.Server.*`; no literal is asserted. Live output: `https://api.nytimes.com/svc/search/v2` |
+| 29 | Low | ❌ | Retry behaviour is still neither configured nor observed. `RetryOptions` members are all `required`; the .NET default is **not** stated in the map, so the plan's "retries off by default" claim remains unverified for C# |
+| 30 | Low | ✔️ | `docs/contract.md` exists and was produced before any `src/` code, as Phase 1 required |
+| 31 | High | ✔️ | Promoted to `FINDINGS.md` **Finding 1** with on-disk evidence, which is where it has external value |
+
+**Net:** 1 Blocker and 3 Criticals closed; 19 fixed in code; 2 still open (BUG-02 wording, BUG-29
+retry) and 1 accepted deviation (BUG-25).
+
+### Defects this report did not and could not predict
+
+All three were only reachable by running against the live APIs, and all three are in the SDKs rather
+than in this repo. They are the highest-value entries in `FINDINGS.md`:
+
+- **Finding 8** — `ArticleSearchArticle.PrintPage` is `int?` where the API sends a string, so *no*
+  Article Search response deserializes. Thrown by `System.Text.Json`, not as an `SdkException`, so a
+  correct catch ladder does not intercept it.
+- **Finding 9** — `Response1.Meta` is bound to `"meta"`; the API sends `"metadata"`. Fails silently.
+- **Finding 6** — PayPal's `ProductionOptions.BaseUrl` is the sandbox host, so no environment member
+  reaches live PayPal.
+
+Findings 8 and 9 are worked around by `scripts/patch-sdk.ps1`, now a required install step.
+
+---
+
 ## A. Blocked evaluation
 
 ### BUG-01 · Blocker · The plugins under test are not installed

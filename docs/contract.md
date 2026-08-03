@@ -143,16 +143,118 @@ for .NET**; `map` does not state the default, so `BUGS.md` BUG-29 stands.
 
 ---
 
-## 5. Still required before Phase 4
+## 5. Operation signatures — read from the map, verified by the compiler
 
-Read, in this order, and record any mismatch as a findings entry at the moment it occurs:
+All six operations below compiled first try. Parameter names are literal; the leading nullable
+parameters have no defaults and **must be passed explicitly** (`null` to skip).
 
-1. `dotnet-paypal-getting-started/map/operations/Orders.md` — signature and error accessors for the
-   create / get / capture operations.
-2. `.../map/operations/Payments.md` — captured-payment get and refund.
-3. `.../map/models/enums.md` — literal member names for the payment-intent, item-category,
-   shipping-preference and user-action enums. **This settles BUG-05.**
-4. `.../map/models/records-*.md` — the order-request field tree, in PascalCase with JSON wire names.
-5. `dotnet-nytimes-getting-started/map/operations/Search.md` — the real C# operation name and
-   parameters.
-6. `.../map/models/records-1-Ar-Vi.md` — the `Article` record, for the headline field path.
+```csharp
+// client.Search — NYT. Note: headers/params are all leading, body-less GET.
+ReturnsAnArrayOfArticles(string? beginDate, string? endDate, string? fq, int? page,
+                         string? q, Sort? sort,
+                         RequestOptions? requestOptions = null, CancellationToken ct = default)
+    -> ReturnsAnArrayOfArticlesResponse
+    throws SdkException<ReturnsAnArrayOfArticlesError>
+           .TryGetNoContent(out RawError)  [400, 401, 429 — all three share one accessor,
+                                            so branch on RawError.StatusCode]
+
+// client.Orders — PayPal. FIVE header params precede `body`.
+CreateOrder(string? payPalMockResponse, string? payPalRequestId,
+            string? payPalPartnerAttributionId, string? payPalClientMetadataId,
+            string? payPalAuthAssertion, OrderRequest body,
+            string? prefer = "return=minimal", ...)                    -> Order
+GetOrder(string id, string? fields, string? payPalMockResponse,
+         string? payPalAuthAssertion, ...)                             -> Order
+CaptureOrder(string id, string? payPalMockResponse, string? payPalRequestId,
+             string? payPalClientMetadataId, string? payPalAuthAssertion,
+             OrderCaptureRequest? body, string? prefer = "return=minimal", ...)  -> Order
+
+// client.Payments — PayPal.
+GetCapturedPayment(string captureId, string? payPalMockResponse, ...)   -> CapturedPayment
+RefundCapturedPayment(string captureId, string? payPalMockResponse, string? payPalRequestId,
+                      string? payPalAuthAssertion, RefundRequest? body,
+                      string? prefer = "return=minimal", ...)          -> Refund
+```
+
+PayPal errors are all Case A with `TryGetError(out Error)` plus a `TryGetRawError` fallback.
+`Error { Name, Message, DebugId required, Details: IReadOnlyList<ErrorDetails>? }` and
+`ErrorDetails { Field?, Value?, Location?, Issue required, Description? }` — so the issue code is
+`error.Details[0].Issue`, and branching is on that, never on message text.
+
+### Enum members — settles BUG-05
+
+Members are **PascalCase**; the SCREAMING_SNAKE spellings in the build plan are the *wire values*.
+Both spellings appear in the plan because the two were conflated, not because one was invented.
+
+| Enum | Member used | Wire value |
+| --- | --- | --- |
+| `CheckoutPaymentIntent` | `.Capture` | `CAPTURE` |
+| `ItemCategory` | `.DigitalGoods` | `DIGITAL_GOODS` |
+| `ApplicationContextShippingPreference` | `.NoShipping` | `NO_SHIPPING` |
+| `PayPalExperienceUserAction` | `.PayNow` | `PAY_NOW` |
+| `Sort` (NYT) | `.Newest` / `.Oldest` / `.Relevance` / `.Best` | lowercase |
+
+### Model field trees
+
+```
+OrderRequest        { Intent !req, PurchaseUnits: IReadOnlyList<PurchaseUnitRequest> !req,
+                      PaymentSource?, ApplicationContext?, ProcessingInstruction?, Payer? }
+PurchaseUnitRequest { Amount: AmountWithBreakdown !req, Items: IReadOnlyList<ItemRequest>?,
+                      CustomId?, InvoiceId?, Description?, ReferenceId?, SoftDescriptor?, ... }
+AmountWithBreakdown { CurrencyCode !req, Value !req, Breakdown: AmountBreakdown? }
+AmountBreakdown     { ItemTotal: Money?, Shipping?, Handling?, TaxTotal?, Insurance?, ... }
+Money               { CurrencyCode !req, Value !req }
+ItemRequest         { Name !req, UnitAmount: Money !req, Quantity: STRING !req,
+                      Category: ItemCategory?, Url?, Description?, Sku?, Tax? }
+PaymentSource       { Paypal: PayPalWallet?, Card?, Token?, ApplePay?, GooglePay?, Venmo?, ... }
+PayPalWallet        { ExperienceContext: PayPalWalletExperienceContext?, EmailAddress?, ... }
+PayPalWalletExperienceContext
+                    { BrandName?, Locale?, ShippingPreference?, UserAction?,
+                      ReturnUrl?, CancelUrl?, LandingPage?, ContactPreference?, ... }
+RefundRequest       { Amount: Money?, CustomId?, InvoiceId?, NoteToPayer?, PaymentInstruction? }
+
+Order               { Id?, Status: OrderStatus?, PurchaseUnits: IReadOnlyList<PurchaseUnit>?,
+                      Links: IReadOnlyList<LinkDescription>?, CreateTime?, ... }
+PurchaseUnit        { CustomId?, InvoiceId?, Amount?, Payments: PaymentCollection?, ... }
+PaymentCollection   { Captures: IReadOnlyList<OrdersCapture>?, Authorizations?, Refunds? }
+OrdersCapture       { Id?, Status: CaptureStatus?, Amount: Money?, CustomId?, InvoiceId?, ... }
+LinkDescription     { Href !req, Rel !req, Method? }
+```
+
+**Capture id path — confirmed:** `order.PurchaseUnits[0].Payments.Captures[0].Id`.
+**Approve link:** the `LinkDescription` whose `Rel` is `payer-action`, falling back to `approve`.
+Live output confirms `payer-action` is the one PayPal returns.
+
+`ItemRequest.Quantity` is a **string** (`^[1-9][0-9]{0,9}$`) — the plan predicted this trap and the
+map typed it correctly.
+
+### What the map could not settle
+
+Four facts required the source clone the skill itself recommends as the fallback:
+
+| Fact | Why the map was insufficient |
+| --- | --- |
+| `ApplicationContextShippingPreference` members | The enum's table row was truncated in the rendered markdown |
+| `OAuth2ClientCredentials { ClientId, ClientSecret, Scope? }` | Named as a type; fields not listed |
+| `ServerOptions { Default, Default1..Default5 }` | Needed to read base URLs for the startup banner |
+| NYT docs element is `ArticleSearchArticle` | **Not** the `Article` record a name-based guess lands on. It exposes `Uri` but **no `Id`**, and `Headline` is `ArticleSearchHeadline { Main?, Kicker?, PrintHeadline? }` — so the headline path is `Headline.Main` |
+
+---
+
+## 6. Runtime corrections — where the SDKs disagree with the live APIs
+
+Everything above is what the SDK *declares*. Three facts only surfaced by calling the real endpoints,
+and two of them are outright defects requiring `scripts/patch-sdk.ps1`:
+
+| Declared | Live reality | Consequence |
+| --- | --- | --- |
+| `ArticleSearchArticle.PrintPage: int?` | `print_page` is a **string** (`"3"`) | **No Article Search response deserializes.** `JsonException` from `System.Text.Json`, not an `SdkException` — a correct catch ladder never sees it. `FINDINGS.md` Finding 8 |
+| `Response1.Meta` bound to `"meta"` | API sends **`"metadata"`** | `Meta` always null; hit counts silently unavailable. Finding 9 |
+| `ServerEnvironment.Production` | `ProductionOptions.BaseUrl` **is the sandbox host** | No environment member reaches live PayPal. Finding 6 |
+
+One further trap, cosmetic but pervasive: `TypedEnum` overrides `ToString()` to return `Value`, but
+every generated enum is a `record`, so the compiler-synthesised `ToString()` shadows it. Interpolate
+one and you get `OrderStatus { Value = CREATED }`. **Always use `.Value`.** Finding 10.
+
+Also confirmed live: NYT `ServerEnvironment` has only `Production` — there is no NYT sandbox, and
+Article Search runs against production. It is read-only.
